@@ -1,0 +1,8 @@
+target/
+.mvn/dists/
+.idea/
+.vscode/
+*.iml
+.env
+!.env.example
+logs/
