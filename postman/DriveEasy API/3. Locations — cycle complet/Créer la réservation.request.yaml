@@ -1,0 +1,24 @@
+$kind: http-request
+url: "{{gateway}}/api/locations"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "clientId": "{{clientId}}",
+      "vehiculeId": "{{vehiculeId}}",
+      "dateDebut": "{{dateDebut}}",
+      "dateFin": "{{dateFin}}"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("Statut 201", () => pm.response.to.have.status(201));
+      const r = pm.response.json();
+      pm.collectionVariables.set("locationId", r.id);
+      pm.test("Statut RESERVEE", () => pm.expect(r.statut).to.eql("RESERVEE"));
+      pm.test("Montant 300", () => pm.expect(r.montantTotal).to.eql(300));
+    language: text/javascript
+order: 5000

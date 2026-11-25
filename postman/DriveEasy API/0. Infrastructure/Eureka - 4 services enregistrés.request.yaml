@@ -1,0 +1,15 @@
+$kind: http-request
+name: "Eureka : 4 services enregistrés"
+url: "{{eureka}}/eureka/apps"
+method: GET
+headers:
+  Accept: application/json
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("Statut 200", () => pm.response.to.have.status(200));
+      const noms = pm.response.json().applications.application.map(a => a.name);
+      ["API-GATEWAY", "VEHICULE-SERVICE", "CLIENT-SERVICE", "LOCATION-SERVICE"].forEach(n =>
+        pm.test(n + " enregistré", () => pm.expect(noms).to.include(n)));
+    language: text/javascript
+order: 1000

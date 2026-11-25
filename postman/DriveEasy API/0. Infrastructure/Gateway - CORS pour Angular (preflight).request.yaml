@@ -1,0 +1,14 @@
+$kind: http-request
+name: "Gateway : CORS pour Angular (preflight)"
+url: "{{gateway}}/api/vehicules"
+method: OPTIONS
+headers:
+  Origin: http://localhost:4200
+  Access-Control-Request-Method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("Statut 200", () => pm.response.to.have.status(200));
+      pm.test("Origine autorisée", () => pm.expect(pm.response.headers.get("Access-Control-Allow-Origin")).to.eql("http://localhost:4200"));
+    language: text/javascript
+order: 4000

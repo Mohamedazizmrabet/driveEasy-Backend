@@ -1,0 +1,36 @@
+$kind: http-request
+url: "{{gateway}}/api/clients"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "cin": "{{cin}}",
+      "nom": "Postman",
+      "prenom": "Test",
+      "dateNaissance": "1995-05-20",
+      "email": "{{email}}",
+      "telephone": "+216 20 000 000",
+      "adresse": "Tunis",
+      "numeroPermis": "{{permis}}",
+      "dateExpirationPermis": "2035-01-01"
+    }
+scripts:
+  - type: beforeRequest
+    code: |-
+      const n = _.random(10000000, 99999999);
+      pm.collectionVariables.set("cin", String(n));
+      pm.collectionVariables.set("email", `postman.${n}@example.tn`);
+      pm.collectionVariables.set("permis", `P-${n}`);
+    language: text/javascript
+  - type: afterResponse
+    code: |-
+      pm.test("Statut 201", () => pm.response.to.have.status(201));
+      const r = pm.response.json();
+      pm.collectionVariables.set("clientId", r.id);
+      pm.test("Catégorie STANDARD par défaut", () => pm.expect(r.categorieClient).to.eql("STANDARD"));
+      pm.test("Permis non expiré", () => pm.expect(r.permisExpire).to.be.false);
+    language: text/javascript
+order: 1000

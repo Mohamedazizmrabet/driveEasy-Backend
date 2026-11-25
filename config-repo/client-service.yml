@@ -8,9 +8,25 @@ eureka:
     service-url:
       defaultZone: http://localhost:8761/eureka/
 management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  info:
+    env:
+      enabled: true
   tracing:
     sampling:
       probability: 1.0
   zipkin:
     tracing:
       endpoint: http://localhost:9411/api/v2/spans
+info:
+  app:
+    name: client-service
+    description: Gestion des clients et de la validité du permis de conduire
+# Propriétés métier
+driveeasy:
+  client:
+    age-minimum: 21
+    donnees-demo: true

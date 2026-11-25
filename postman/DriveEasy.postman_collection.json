@@ -1,0 +1,1303 @@
+{
+  "info": {
+    "name": "DriveEasy API",
+    "description": "Tests de bout en bout de DriveEasy via l'API Gateway (port 8080).\n\nPrérequis : Eureka, Config Server, les 3 microservices et la gateway démarrés.\nLa collection crée son propre client et son propre véhicule (valeurs aléatoires) : elle peut être relancée.\nÀ exécuter dans l'ordre (Run collection).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "gateway",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "eureka",
+      "value": "http://localhost:8761"
+    },
+    {
+      "key": "config",
+      "value": "http://localhost:8888"
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Dates relatives au jour d'exécution (location de 3 jours commençant aujourd'hui)",
+          "const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, \"0\")}-${String(d.getDate()).padStart(2, \"0\")}`;",
+          "const plus = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return iso(d); };",
+          "pm.collectionVariables.set(\"dateDebut\", plus(0));",
+          "pm.collectionVariables.set(\"dateFin\", plus(3));",
+          "pm.collectionVariables.set(\"dateChevauchement\", plus(2));",
+          "pm.collectionVariables.set(\"dateFinChevauchement\", plus(5));",
+          "pm.collectionVariables.set(\"dateRetourRetard\", plus(5));",
+          "pm.collectionVariables.set(\"dateDebut2\", plus(10));",
+          "pm.collectionVariables.set(\"dateFin2\", plus(12));"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "0. Infrastructure",
+      "item": [
+        {
+          "name": "Eureka : 4 services enregistrés",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{eureka}}/eureka/apps"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 200\", () => pm.response.to.have.status(200));",
+                  "const noms = pm.response.json().applications.application.map(a => a.name);",
+                  "[\"API-GATEWAY\", \"VEHICULE-SERVICE\", \"CLIENT-SERVICE\", \"LOCATION-SERVICE\"].forEach(n =>",
+                  "  pm.test(n + \" enregistré\", () => pm.expect(noms).to.include(n)));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Config Server : configuration de location-service",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{config}}/location-service/default"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 200\", () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "const props = Object.assign({}, ...r.propertySources.map(s => s.source));",
+                  "pm.test(\"Port externalisé\", () => pm.expect(props[\"server.port\"]).to.eql(8083));",
+                  "pm.test(\"Remise VIP externalisée\", () => pm.expect(props[\"driveeasy.location.remise-vip\"]).to.eql(0.1));",
+                  "pm.test(\"Zipkin à 1.0\", () => pm.expect(props[\"management.tracing.sampling.probability\"]).to.eql(1.0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Gateway : health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gateway}}/actuator/health"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"UP\", () => pm.expect(pm.response.json().status).to.eql(\"UP\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Gateway : CORS pour Angular (preflight)",
+          "request": {
+            "method": "OPTIONS",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "http://localhost:4200"
+              },
+              {
+                "key": "Access-Control-Request-Method",
+                "value": "GET"
+              }
+            ],
+            "url": "{{gateway}}/api/vehicules"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Origine autorisée\", () => pm.expect(pm.response.headers.get(\"Access-Control-Allow-Origin\")).to.eql(\"http://localhost:4200\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "1. Véhicules",
+      "item": [
+        {
+          "name": "Lister avec filtres",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gateway}}/api/vehicules?carburant=DIESEL&prixMax=200"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 200\", () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test(\"Filtre carburant et prix\", () => r.forEach(v => {",
+                  "  pm.expect(v.carburant).to.eql(\"DIESEL\"); pm.expect(v.prixJournalier).to.be.at.most(200); }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Créer un véhicule",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{gateway}}/api/vehicules",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"immatriculation\": \"{{immat}}\",\n  \"marque\": \"Dacia\",\n  \"modele\": \"Sandero\",\n  \"annee\": 2024,\n  \"couleur\": \"Gris\",\n  \"categorie\": \"ECONOMIQUE\",\n  \"carburant\": \"ESSENCE\",\n  \"boite\": \"MANUELLE\",\n  \"nbPlaces\": 5,\n  \"kilometrage\": 1000,\n  \"prixJournalier\": 100,\n  \"imageUrl\": \"https://placehold.co/600x400?text=Dacia+Sandero\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"immat\", `${_.random(100, 999)} TU ${_.random(1000, 9999)}`);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 201\", () => pm.response.to.have.status(201));",
+                  "const r = pm.response.json();",
+                  "pm.collectionVariables.set(\"vehiculeId\", r.id);",
+                  "pm.test(\"Statut DISPONIBLE par défaut\", () => pm.expect(r.statut).to.eql(\"DISPONIBLE\"));",
+                  "pm.test(\"En-tête Location\", () => pm.expect(pm.response.headers.get(\"Location\")).to.include(\"/vehicules/\" + r.id));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Immatriculation en double → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{gateway}}/api/vehicules",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"immatriculation\": \"{{immat}}\",\n  \"marque\": \"Dacia\",\n  \"modele\": \"Sandero\",\n  \"annee\": 2024,\n  \"couleur\": \"Gris\",\n  \"categorie\": \"ECONOMIQUE\",\n  \"carburant\": \"ESSENCE\",\n  \"boite\": \"MANUELLE\",\n  \"nbPlaces\": 5,\n  \"kilometrage\": 1000,\n  \"prixJournalier\": 100,\n  \"imageUrl\": \"https://placehold.co/600x400?text=Dacia+Sandero\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 409\", () => pm.response.to.have.status(409));",
+                  "const r = pm.response.json();",
+                  "pm.test(\"Message : existe déjà\", () => pm.expect(r.message).to.include(\"existe déjà\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Prix journalier négatif → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{gateway}}/api/vehicules",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"immatriculation\": \"XX\",\n  \"marque\": \"Dacia\",\n  \"modele\": \"Sandero\",\n  \"annee\": 2024,\n  \"couleur\": \"Gris\",\n  \"categorie\": \"ECONOMIQUE\",\n  \"carburant\": \"ESSENCE\",\n  \"boite\": \"MANUELLE\",\n  \"nbPlaces\": 5,\n  \"kilometrage\": 1000,\n  \"prixJournalier\": -10,\n  \"imageUrl\": \"https://placehold.co/600x400?text=Dacia+Sandero\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 400\", () => pm.response.to.have.status(400));",
+                  "const r = pm.response.json();",
+                  "pm.test(\"Champ en erreur\", () => pm.expect(r.details).to.have.property(\"prixJournalier\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Année future → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{gateway}}/api/vehicules",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"immatriculation\": \"YY\",\n  \"marque\": \"Dacia\",\n  \"modele\": \"Sandero\",\n  \"annee\": 2099,\n  \"couleur\": \"Gris\",\n  \"categorie\": \"ECONOMIQUE\",\n  \"carburant\": \"ESSENCE\",\n  \"boite\": \"MANUELLE\",\n  \"nbPlaces\": 5,\n  \"kilometrage\": 1000,\n  \"prixJournalier\": 100,\n  \"imageUrl\": \"https://placehold.co/600x400?text=Dacia+Sandero\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 400\", () => pm.response.to.have.status(400));",
+                  "const r = pm.response.json();",
+                  "pm.test(\"Message : année\", () => pm.expect(r.message).to.include(\"année\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Détail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gateway}}/api/vehicules/{{vehiculeId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 200\", () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test(\"Bon véhicule\", () => pm.expect(r.id).to.eql(Number(pm.collectionVariables.get(\"vehiculeId\"))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Véhicule inexistant → 404",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gateway}}/api/vehicules/999999"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Modifier",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{gateway}}/api/vehicules/{{vehiculeId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"immatriculation\": \"{{immat}}\",\n  \"marque\": \"Dacia\",\n  \"modele\": \"Sandero\",\n  \"annee\": 2024,\n  \"couleur\": \"Bleu\",\n  \"categorie\": \"ECONOMIQUE\",\n  \"carburant\": \"ESSENCE\",\n  \"boite\": \"MANUELLE\",\n  \"nbPlaces\": 5,\n  \"kilometrage\": 1000,\n  \"prixJournalier\": 100,\n  \"imageUrl\": \"https://placehold.co/600x400?text=Dacia+Sandero\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 200\", () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test(\"Couleur modifiée\", () => pm.expect(r.couleur).to.eql(\"Bleu\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Passer au statut LOUE via PUT → 409",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{gateway}}/api/vehicules/{{vehiculeId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"immatriculation\": \"{{immat}}\",\n  \"marque\": \"Dacia\",\n  \"modele\": \"Sandero\",\n  \"annee\": 2024,\n  \"couleur\": \"Gris\",\n  \"categorie\": \"ECONOMIQUE\",\n  \"carburant\": \"ESSENCE\",\n  \"boite\": \"MANUELLE\",\n  \"nbPlaces\": 5,\n  \"kilometrage\": 1000,\n  \"prixJournalier\": 100,\n  \"imageUrl\": \"https://placehold.co/600x400?text=Dacia+Sandero\",\n  \"statut\": \"LOUE\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 409\", () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Disponibles sur la période",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gateway}}/api/vehicules/disponibles?dateDebut={{dateDebut}}&dateFin={{dateFin}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 200\", () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test(\"Contient le nouveau véhicule\", () => pm.expect(r.map(v => v.id)).to.include(Number(pm.collectionVariables.get(\"vehiculeId\"))));",
+                  "pm.test(\"Aucun véhicule en maintenance\", () => r.forEach(v => pm.expect(v.statut).to.eql(\"DISPONIBLE\")));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Clients",
+      "item": [
+        {
+          "name": "Créer un client",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{gateway}}/api/clients",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cin\": \"{{cin}}\",\n  \"nom\": \"Postman\",\n  \"prenom\": \"Test\",\n  \"dateNaissance\": \"1995-05-20\",\n  \"email\": \"{{email}}\",\n  \"telephone\": \"+216 20 000 000\",\n  \"adresse\": \"Tunis\",\n  \"numeroPermis\": \"{{permis}}\",\n  \"dateExpirationPermis\": \"2035-01-01\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const n = _.random(10000000, 99999999);",
+                  "pm.collectionVariables.set(\"cin\", String(n));",
+                  "pm.collectionVariables.set(\"email\", `postman.${n}@example.tn`);",
+                  "pm.collectionVariables.set(\"permis\", `P-${n}`);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 201\", () => pm.response.to.have.status(201));",
+                  "const r = pm.response.json();",
+                  "pm.collectionVariables.set(\"clientId\", r.id);",
+                  "pm.test(\"Catégorie STANDARD par défaut\", () => pm.expect(r.categorieClient).to.eql(\"STANDARD\"));",
+                  "pm.test(\"Permis non expiré\", () => pm.expect(r.permisExpire).to.be.false);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CIN en double → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{gateway}}/api/clients",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cin\": \"{{cin}}\",\n  \"nom\": \"Postman\",\n  \"prenom\": \"Test\",\n  \"dateNaissance\": \"1995-05-20\",\n  \"email\": \"autre@example.tn\",\n  \"telephone\": \"+216 20 000 000\",\n  \"adresse\": \"Tunis\",\n  \"numeroPermis\": \"AUTRE\",\n  \"dateExpirationPermis\": \"2035-01-01\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 409\", () => pm.response.to.have.status(409));",
+                  "const r = pm.response.json();",
+                  "pm.test(\"Message : CIN\", () => pm.expect(r.message).to.include(\"CIN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Email invalide → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{gateway}}/api/clients",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cin\": \"00000001\",\n  \"nom\": \"Postman\",\n  \"prenom\": \"Test\",\n  \"dateNaissance\": \"1995-05-20\",\n  \"email\": \"pas-un-email\",\n  \"telephone\": \"+216 20 000 000\",\n  \"adresse\": \"Tunis\",\n  \"numeroPermis\": \"X1\",\n  \"dateExpirationPermis\": \"2035-01-01\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 400\", () => pm.response.to.have.status(400));",
+                  "const r = pm.response.json();",
+                  "pm.test(\"Champ email en erreur\", () => pm.expect(r.details).to.have.property(\"email\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rechercher par CIN",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gateway}}/api/clients?cin={{cin}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 200\", () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test(\"Un résultat\", () => pm.expect(r).to.have.lengthOf(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Éligibilité : client valide",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gateway}}/api/clients/{{clientId}}/eligibilite"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Éligible\", () => pm.expect(pm.response.json().eligible).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Éligibilité : client de 19 ans (démo id 4)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gateway}}/api/clients/4/eligibilite"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 200\", () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test(\"Non éligible\", () => pm.expect(r.eligible).to.be.false);",
+                  "pm.test(\"Motif âge\", () => pm.expect(r.motifs.join()).to.include(\"Âge\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Éligibilité : permis expiré (démo id 5)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gateway}}/api/clients/5/eligibilite"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 200\", () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test(\"Permis invalide\", () => pm.expect(r.permisValide).to.be.false);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Client inexistant → 404",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gateway}}/api/clients/999999"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. Locations — cycle complet",
+      "item": [
+        {
+          "name": "Simulation du prix",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{gateway}}/api/locations/simulation",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clientId\": \"{{clientId}}\",\n  \"vehiculeId\": \"{{vehiculeId}}\",\n  \"dateDebut\": \"{{dateDebut}}\",\n  \"dateFin\": \"{{dateFin}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 200\", () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test(\"3 jours × 100 = 300 (STANDARD, coef 1.0)\", () => pm.expect(r.montantTotal).to.eql(300));",
+                  "pm.test(\"Client éligible et véhicule disponible\", () => { pm.expect(r.clientEligible).to.be.true; pm.expect(r.vehiculeDisponible).to.be.true; });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Simulation VIP + SUV (démo : client 3, véhicule 5)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{gateway}}/api/locations/simulation",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clientId\": 3,\n  \"vehiculeId\": 5,\n  \"dateDebut\": \"{{dateDebut}}\",\n  \"dateFin\": \"{{dateFin}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 200\", () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test(\"Remise VIP 10 %\", () => pm.expect(r.tauxRemise).to.eql(0.1));",
+                  "pm.test(\"Coefficient SUV 1.2\", () => pm.expect(r.coefficientCategorie).to.eql(1.2));",
+                  "pm.test(\"Total = brut − remise\", () => pm.expect(r.montantTotal).to.be.closeTo(r.montantBrut * 0.9, 0.01));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Client non éligible → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{gateway}}/api/locations",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clientId\": 4,\n  \"vehiculeId\": \"{{vehiculeId}}\",\n  \"dateDebut\": \"{{dateDebut}}\",\n  \"dateFin\": \"{{dateFin}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 400\", () => pm.response.to.have.status(400));",
+                  "const r = pm.response.json();",
+                  "pm.test(\"Message : non éligible\", () => pm.expect(r.message).to.include(\"non éligible\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Véhicule en maintenance → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{gateway}}/api/locations",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clientId\": \"{{clientId}}\",\n  \"vehiculeId\": 7,\n  \"dateDebut\": \"{{dateDebut}}\",\n  \"dateFin\": \"{{dateFin}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 409\", () => pm.response.to.have.status(409));",
+                  "const r = pm.response.json();",
+                  "pm.test(\"Message : maintenance\", () => pm.expect(r.message).to.include(\"maintenance\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Créer la réservation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{gateway}}/api/locations",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clientId\": \"{{clientId}}\",\n  \"vehiculeId\": \"{{vehiculeId}}\",\n  \"dateDebut\": \"{{dateDebut}}\",\n  \"dateFin\": \"{{dateFin}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 201\", () => pm.response.to.have.status(201));",
+                  "const r = pm.response.json();",
+                  "pm.collectionVariables.set(\"locationId\", r.id);",
+                  "pm.test(\"Statut RESERVEE\", () => pm.expect(r.statut).to.eql(\"RESERVEE\"));",
+                  "pm.test(\"Montant 300\", () => pm.expect(r.montantTotal).to.eql(300));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Réservation qui chevauche → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{gateway}}/api/locations",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clientId\": \"{{clientId}}\",\n  \"vehiculeId\": \"{{vehiculeId}}\",\n  \"dateDebut\": \"{{dateChevauchement}}\",\n  \"dateFin\": \"{{dateFinChevauchement}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 409\", () => pm.response.to.have.status(409));",
+                  "const r = pm.response.json();",
+                  "pm.test(\"Message : déjà réservé\", () => pm.expect(r.message).to.include(\"déjà réservé\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Supprimer le client (location active) → 409",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{gateway}}/api/clients/{{clientId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 409\", () => pm.response.to.have.status(409));",
+                  "const r = pm.response.json();",
+                  "pm.test(\"Message : location\", () => pm.expect(r.message).to.include(\"location\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Supprimer le véhicule (réservé) → 409",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{gateway}}/api/vehicules/{{vehiculeId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 409\", () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Départ",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{gateway}}/api/locations/{{locationId}}/depart"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 200\", () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test(\"EN_COURS\", () => pm.expect(r.statut).to.eql(\"EN_COURS\"));",
+                  "pm.test(\"kmDepart = kilométrage du véhicule\", () => pm.expect(r.kmDepart).to.eql(1000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Véhicule passé à LOUE",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gateway}}/api/vehicules/{{vehiculeId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"LOUE\", () => pm.expect(pm.response.json().statut).to.eql(\"LOUE\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Départ en double → 409",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{gateway}}/api/locations/{{locationId}}/depart"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 409\", () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Retour avec km < départ → 400",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{gateway}}/api/locations/{{locationId}}/retour",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"kmRetour\": 500,\n  \"dateRetour\": \"{{dateRetourRetard}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Retour avec 2 jours de retard",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{gateway}}/api/locations/{{locationId}}/retour",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"kmRetour\": 1450,\n  \"dateRetour\": \"{{dateRetourRetard}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 200\", () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test(\"TERMINEE\", () => pm.expect(r.statut).to.eql(\"TERMINEE\"));",
+                  "pm.test(\"Pénalité = 2 × 1,5 × 100 = 300\", () => pm.expect(r.penalite).to.eql(300));",
+                  "pm.test(\"Total = 300 + 300\", () => pm.expect(r.montantTotal).to.eql(600));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Véhicule de nouveau DISPONIBLE, km mis à jour",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gateway}}/api/vehicules/{{vehiculeId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 200\", () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test(\"DISPONIBLE\", () => pm.expect(r.statut).to.eql(\"DISPONIBLE\"));",
+                  "pm.test(\"Kilométrage 1450\", () => pm.expect(r.kilometrage).to.eql(1450));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Annuler une location terminée → 409",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{gateway}}/api/locations/{{locationId}}/annulation"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 409\", () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Nouvelle réservation (à annuler)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{gateway}}/api/locations",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clientId\": \"{{clientId}}\",\n  \"vehiculeId\": \"{{vehiculeId}}\",\n  \"dateDebut\": \"{{dateDebut2}}\",\n  \"dateFin\": \"{{dateFin2}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 201\", () => pm.response.to.have.status(201));",
+                  "const r = pm.response.json();",
+                  "pm.collectionVariables.set(\"locationId2\", r.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Annulation",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{gateway}}/api/locations/{{locationId2}}/annulation"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"ANNULEE\", () => pm.expect(pm.response.json().statut).to.eql(\"ANNULEE\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Période libérée après annulation",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gateway}}/api/vehicules/{{vehiculeId}}/disponibilite?dateDebut={{dateDebut2}}&dateFin={{dateFin2}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Disponible\", () => pm.expect(pm.response.json().disponible).to.be.true);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. Consultation et statistiques",
+      "item": [
+        {
+          "name": "Liste paginée filtrée",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gateway}}/api/locations?clientId={{clientId}}&page=0&size=1"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 200\", () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test(\"2 locations au total\", () => pm.expect(r.totalElements).to.eql(2));",
+                  "pm.test(\"1 par page\", () => { pm.expect(r.content).to.have.lengthOf(1); pm.expect(r.totalPages).to.eql(2); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Filtre par statut",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gateway}}/api/locations?statut=ANNULEE&clientId={{clientId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Seulement ANNULEE\", () => pm.response.json().content.forEach(l => pm.expect(l.statut).to.eql(\"ANNULEE\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Détail enrichi (client + véhicule)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gateway}}/api/locations/{{locationId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 200\", () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test(\"Client agrégé\", () => pm.expect(r.client.id).to.eql(Number(pm.collectionVariables.get(\"clientId\"))));",
+                  "pm.test(\"Véhicule agrégé\", () => pm.expect(r.vehicule.id).to.eql(Number(pm.collectionVariables.get(\"vehiculeId\"))));",
+                  "pm.test(\"Aucun avertissement\", () => pm.expect(r.avertissements).to.be.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Statistiques",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gateway}}/api/locations/statistiques"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 200\", () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test(\"Chiffre d'affaires > 0\", () => pm.expect(r.chiffreAffaires).to.be.above(0));",
+                  "pm.test(\"Taux d'occupation calculé\", () => pm.expect(r.tauxOccupation).to.be.a(\"number\"));",
+                  "pm.test(\"Top véhicules (max 5)\", () => pm.expect(r.topVehicules.length).to.be.within(1, 5));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pagination invalide → 400",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gateway}}/api/locations?size=500"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "5. Fidélité et nettoyage",
+      "item": [
+        {
+          "name": "Changer la catégorie (VIP)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{gateway}}/api/clients/{{clientId}}/categorie",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"categorieClient\": \"VIP\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"VIP\", () => pm.expect(pm.response.json().categorieClient).to.eql(\"VIP\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Supprimer le client (plus de location active)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{gateway}}/api/clients/{{clientId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Supprimer le véhicule",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{gateway}}/api/vehicules/{{vehiculeId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Véhicule supprimé → 404",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{gateway}}/api/vehicules/{{vehiculeId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Statut 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

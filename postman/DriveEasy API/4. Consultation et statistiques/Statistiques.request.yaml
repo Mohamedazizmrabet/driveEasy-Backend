@@ -1,0 +1,13 @@
+$kind: http-request
+url: "{{gateway}}/api/locations/statistiques"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("Statut 200", () => pm.response.to.have.status(200));
+      const r = pm.response.json();
+      pm.test("Chiffre d'affaires > 0", () => pm.expect(r.chiffreAffaires).to.be.above(0));
+      pm.test("Taux d'occupation calculé", () => pm.expect(r.tauxOccupation).to.be.a("number"));
+      pm.test("Top véhicules (max 5)", () => pm.expect(r.topVehicules.length).to.be.within(1, 5));
+    language: text/javascript
+order: 4000

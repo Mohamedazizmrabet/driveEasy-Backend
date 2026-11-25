@@ -1,0 +1,25 @@
+$kind: http-request
+name: "Simulation VIP + SUV (démo : client 3, véhicule 5)"
+url: "{{gateway}}/api/locations/simulation"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "clientId": 3,
+      "vehiculeId": 5,
+      "dateDebut": "{{dateDebut}}",
+      "dateFin": "{{dateFin}}"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("Statut 200", () => pm.response.to.have.status(200));
+      const r = pm.response.json();
+      pm.test("Remise VIP 10 %", () => pm.expect(r.tauxRemise).to.eql(0.1));
+      pm.test("Coefficient SUV 1.2", () => pm.expect(r.coefficientCategorie).to.eql(1.2));
+      pm.test("Total = brut − remise", () => pm.expect(r.montantTotal).to.be.closeTo(r.montantBrut * 0.9, 0.01));
+    language: text/javascript
+order: 2000

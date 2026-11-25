@@ -1,0 +1,23 @@
+$kind: http-request
+url: "{{gateway}}/api/locations/simulation"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "clientId": "{{clientId}}",
+      "vehiculeId": "{{vehiculeId}}",
+      "dateDebut": "{{dateDebut}}",
+      "dateFin": "{{dateFin}}"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("Statut 200", () => pm.response.to.have.status(200));
+      const r = pm.response.json();
+      pm.test("3 jours × 100 = 300 (STANDARD, coef 1.0)", () => pm.expect(r.montantTotal).to.eql(300));
+      pm.test("Client éligible et véhicule disponible", () => { pm.expect(r.clientEligible).to.be.true; pm.expect(r.vehiculeDisponible).to.be.true; });
+    language: text/javascript
+order: 1000

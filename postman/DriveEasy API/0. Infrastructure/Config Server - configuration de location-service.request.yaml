@@ -1,0 +1,15 @@
+$kind: http-request
+name: "Config Server : configuration de location-service"
+url: "{{config}}/location-service/default"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("Statut 200", () => pm.response.to.have.status(200));
+      const r = pm.response.json();
+      const props = Object.assign({}, ...r.propertySources.map(s => s.source));
+      pm.test("Port externalisé", () => pm.expect(props["server.port"]).to.eql(8083));
+      pm.test("Remise VIP externalisée", () => pm.expect(props["driveeasy.location.remise-vip"]).to.eql(0.1));
+      pm.test("Zipkin à 1.0", () => pm.expect(props["management.tracing.sampling.probability"]).to.eql(1.0));
+    language: text/javascript
+order: 2000

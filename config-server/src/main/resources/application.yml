@@ -3,16 +3,38 @@ server:
 spring:
   application:
     name: config-server
-  cloud:
-    config:
-      server:
-        git:
-          uri: file:.
-          search-paths: config-repo
-          default-label: main
-          clone-on-start: false
+  profiles:
+    # native : lit directement le dossier config-repo (développement local)
+    # git    : clone le dépôt GitHub de configuration (CONFIG_GIT_URI)
+    active: ${CONFIG_PROFILE:native}
 management:
   endpoints:
     web:
       exposure:
         include: health,info
+---
+spring:
+  config:
+    activate:
+      on-profile: native
+  cloud:
+    config:
+      server:
+        native:
+          # ./ = lancé depuis driveeasy-backend (java -jar) ; ../ = lancé via mvnw -pl config-server
+          search-locations: ${CONFIG_REPO_PATH:file:./config-repo,file:../config-repo}
+---
+spring:
+  config:
+    activate:
+      on-profile: git
+  cloud:
+    config:
+      server:
+        git:
+          # Dépôt dédié (ex. https://github.com/<compte>/driveeasy-config), jamais le dépôt backend lui-même
+          uri: ${CONFIG_GIT_URI}
+          default-label: ${CONFIG_GIT_BRANCH:main}
+          clone-on-start: true
+          # Copie de travail temporaire, séparée des sources
+          basedir: ${java.io.tmpdir}/driveeasy-config-repo

@@ -1,0 +1,35 @@
+$kind: http-request
+url: "{{gateway}}/api/vehicules"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "immatriculation": "{{immat}}",
+      "marque": "Dacia",
+      "modele": "Sandero",
+      "annee": 2024,
+      "couleur": "Gris",
+      "categorie": "ECONOMIQUE",
+      "carburant": "ESSENCE",
+      "boite": "MANUELLE",
+      "nbPlaces": 5,
+      "kilometrage": 1000,
+      "prixJournalier": 100,
+      "imageUrl": "https://placehold.co/600x400?text=Dacia+Sandero"
+    }
+scripts:
+  - type: beforeRequest
+    code: pm.collectionVariables.set("immat", `${_.random(100, 999)} TU ${_.random(1000, 9999)}`);
+    language: text/javascript
+  - type: afterResponse
+    code: |-
+      pm.test("Statut 201", () => pm.response.to.have.status(201));
+      const r = pm.response.json();
+      pm.collectionVariables.set("vehiculeId", r.id);
+      pm.test("Statut DISPONIBLE par défaut", () => pm.expect(r.statut).to.eql("DISPONIBLE"));
+      pm.test("En-tête Location", () => pm.expect(pm.response.headers.get("Location")).to.include("/vehicules/" + r.id));
+    language: text/javascript
+order: 2000

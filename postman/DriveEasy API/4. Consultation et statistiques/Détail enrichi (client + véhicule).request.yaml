@@ -1,0 +1,13 @@
+$kind: http-request
+url: "{{gateway}}/api/locations/{{locationId}}"
+method: GET
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("Statut 200", () => pm.response.to.have.status(200));
+      const r = pm.response.json();
+      pm.test("Client agrégé", () => pm.expect(r.client.id).to.eql(Number(pm.collectionVariables.get("clientId"))));
+      pm.test("Véhicule agrégé", () => pm.expect(r.vehicule.id).to.eql(Number(pm.collectionVariables.get("vehiculeId"))));
+      pm.test("Aucun avertissement", () => pm.expect(r.avertissements).to.be.empty);
+    language: text/javascript
+order: 3000

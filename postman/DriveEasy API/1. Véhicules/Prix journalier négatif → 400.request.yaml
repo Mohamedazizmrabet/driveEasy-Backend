@@ -1,0 +1,30 @@
+$kind: http-request
+url: "{{gateway}}/api/vehicules"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "immatriculation": "XX",
+      "marque": "Dacia",
+      "modele": "Sandero",
+      "annee": 2024,
+      "couleur": "Gris",
+      "categorie": "ECONOMIQUE",
+      "carburant": "ESSENCE",
+      "boite": "MANUELLE",
+      "nbPlaces": 5,
+      "kilometrage": 1000,
+      "prixJournalier": -10,
+      "imageUrl": "https://placehold.co/600x400?text=Dacia+Sandero"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("Statut 400", () => pm.response.to.have.status(400));
+      const r = pm.response.json();
+      pm.test("Champ en erreur", () => pm.expect(r.details).to.have.property("prixJournalier"));
+    language: text/javascript
+order: 4000

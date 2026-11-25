@@ -1,0 +1,27 @@
+$kind: http-request
+url: "{{gateway}}/api/clients"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "cin": "00000001",
+      "nom": "Postman",
+      "prenom": "Test",
+      "dateNaissance": "1995-05-20",
+      "email": "pas-un-email",
+      "telephone": "+216 20 000 000",
+      "adresse": "Tunis",
+      "numeroPermis": "X1",
+      "dateExpirationPermis": "2035-01-01"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test("Statut 400", () => pm.response.to.have.status(400));
+      const r = pm.response.json();
+      pm.test("Champ email en erreur", () => pm.expect(r.details).to.have.property("email"));
+    language: text/javascript
+order: 3000
