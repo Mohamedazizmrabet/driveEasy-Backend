@@ -1,8 +1,0 @@
-$kind: http-request
-url: "{{gateway}}/api/locations/{{locationId}}/annulation"
-method: PATCH
-scripts:
-  - type: afterResponse
-    code: pm.test("Statut 409", () => pm.response.to.have.status(409));
-    language: text/javascript
-order: 15000
