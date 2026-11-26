@@ -114,7 +114,7 @@ const collection = {
             '  pm.expect(v.carburant).to.eql("DIESEL"); pm.expect(v.prixJournalier).to.be.at.most(200); }));'],
         }),
         req('Créer un véhicule', 'POST', `${G}/vehicules`, {
-          prerequest: ['pm.collectionVariables.set("immat", `${_.random(100, 999)} TU ${_.random(1000, 9999)}`);'],
+          prerequest: ['pm.collectionVariables.set("immat", `${Math.floor(100 + Math.random() * (999 - 100 + 1))} TU ${Math.floor(1000 + Math.random() * (9999 - 1000 + 1))}`);'],
           body: vehicule(),
           tests: [status(201), json, save('vehiculeId'),
             'pm.test("Statut DISPONIBLE par défaut", () => pm.expect(r.statut).to.eql("DISPONIBLE"));',
@@ -153,7 +153,7 @@ const collection = {
       item: [
         req('Créer un client', 'POST', `${G}/clients`, {
           prerequest: [
-            'const n = _.random(10000000, 99999999);',
+            'const n = Math.floor(10000000 + Math.random() * (99999999 - 10000000 + 1));',
             'pm.collectionVariables.set("cin", String(n));',
             'pm.collectionVariables.set("email", `postman.${n}@example.tn`);',
             'pm.collectionVariables.set("permis", `P-${n}`);'],
@@ -264,8 +264,9 @@ const collection = {
       item: [
         req('Liste paginée filtrée', 'GET', `${G}/locations?clientId={{clientId}}&page=0&size=1`, {
           tests: [status(200), json,
-            'pm.test("2 locations au total", () => pm.expect(r.totalElements).to.eql(2));',
-            'pm.test("1 par page", () => { pm.expect(r.content).to.have.lengthOf(1); pm.expect(r.totalPages).to.eql(2); });'],
+            '// at least the 2 rentals of this run (data is in RAM: a restarted client-service can reuse an id)',
+            'pm.test("Au moins 2 locations", () => pm.expect(r.totalElements).to.be.at.least(2));',
+            'pm.test("1 par page", () => { pm.expect(r.content).to.have.lengthOf(1); pm.expect(r.totalPages).to.eql(r.totalElements); });'],
         }),
         req('Filtre par statut', 'GET', `${G}/locations?statut=ANNULEE&clientId={{clientId}}`, {
           tests: [status(200), 'pm.test("Seulement ANNULEE", () => pm.response.json().content.forEach(l => pm.expect(l.statut).to.eql("ANNULEE")));'],

@@ -1,11 +1,3 @@
-# DriveEasy — Backend (Spring Boot / Spring Cloud)
-
-Plateforme de location de véhicules en architecture microservices : parc automobile, clients
-(validité du permis), cycle de vie des locations (réservation → départ → retour / annulation),
-tarification automatique (remises de fidélité, pénalités de retard) et statistiques.
-
-> **Données en RAM uniquement** (aucune base de données, conformément au cahier des charges).
-> Un jeu de données de démonstration est rechargé à chaque démarrage.
 
 ## Architecture
 
@@ -60,23 +52,6 @@ Alternative sans Maven : `java -jar <service>/target/<service>-1.0.0-SNAPSHOT.ja
 
 Attendre que les 4 services apparaissent sur le tableau de bord Eureka avant de tester via la gateway.
 
-### Configuration centralisée
-
-Le Config Server propose deux profils (variable d'environnement `CONFIG_PROFILE`) :
-
-| Profil | Source | Usage |
-|---|---|---|
-| `native` (défaut) | dossier `config-repo/` | développement local |
-| `git` | dépôt GitHub `CONFIG_GIT_URI` (branche `CONFIG_GIT_BRANCH`, défaut `main`) | configuration externalisée sur GitHub |
-
-```powershell
-$env:CONFIG_PROFILE = 'git'; $env:CONFIG_GIT_URI = 'https://github.com/<compte>/driveeasy-config'
-./scripts/start-config-server.ps1
-```
-
-Propriétés externalisées : port, Eureka, Zipkin, actuator (`health`, `info`) et propriétés métier
-(`driveeasy.vehicule.*`, `driveeasy.client.age-minimum`, `driveeasy.location.*` : remises, coefficient de
-pénalité, coefficients par catégorie de véhicule, seuils de fidélité).
 
 ## Règles de gestion implémentées
 
